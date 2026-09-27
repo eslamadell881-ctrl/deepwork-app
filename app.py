@@ -2,10 +2,10 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import plotly.express as px
-from datetime import date, timedelta
+from datetime import date, timedelta, time
 
 # ==========================================
-# 1. إعدادات الصفحة والواجهة الغامقة الفاخرة (Deep Focus Dark Mode)
+# 1. إعدادات الصفحة والواجهة الفاخرة
 # ==========================================
 st.set_page_config(page_title="Deep Work - نظام التركيز العميق", page_icon="🧠", layout="wide")
 
@@ -15,7 +15,6 @@ st.markdown("""
     h1, h2, h3, h4 { color: #38bdf8 !important; font-weight: 700 !important; }
     p, label, span, .stMarkdown { color: #94a3b8 !important; }
     
-    /* بطاقات عصرية بحواف مضيئة هادئة */
     .deep-card {
         background-color: #111827 !important;
         border: 1px solid #1f2937 !important;
@@ -69,7 +68,7 @@ if "logged_in" not in st.session_state:
     st.session_state.user_name = None
 
 # ==========================================
-# 3. شاشة الدخول والتسجيل البسيطة والسريعة
+# 3. شاشة الدخول والتسجيل
 # ==========================================
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 1.4, 1])
@@ -95,7 +94,7 @@ if not st.session_state.logged_in:
                                 st.session_state.user_name = user['name']
                                 st.rerun()
                             else:
-                                st.error("رقم الموبايل غير مسجل. يجدر بك إنشاء حساب جديد.")
+                                st.error("رقم الموبايل غير مسجل.")
                         except Exception as ex:
                             st.error(f"خطأ: {ex}")
                     else:
@@ -127,7 +126,7 @@ user_id = st.session_state.user_id
 user_name = st.session_state.user_name
 
 # ==========================================
-# 4. القائمة الجانبية المحدثة
+# 4. القائمة الجانبية
 # ==========================================
 with st.sidebar:
     st.markdown(f"### ⚡ أهلاً بك، {user_name}")
@@ -145,6 +144,14 @@ with st.sidebar:
     if st.button("🚪 تسجيل الخروج", use_container_width=True):
         st.session_state.logged_in = False
         st.rerun()
+
+# دالة لتحويل وقت 12 ساعة (ساعة، دقيقة، فترة) إلى كائن time 24 ساعة للمقارنة
+def convert_to_24h_time(h, m, period):
+    if period == "مساءً (PM)" and h != 12:
+        h += 12
+    elif period == "صباحاً (AM)" and h == 12:
+        h = 0
+    return time(h, m)
 
 # ==========================================
 # القسم الأول: إدارة المواد
@@ -183,11 +190,11 @@ if app_mode == "📚 إدارة المواد والمجالات":
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# القسم الثاني: التخطيط المسبق
+# القسم الثاني: التخطيط المسبق بدون تداخل وبنظام 12 ساعة
 # ==========================================
 elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
     st.markdown("<h1>🗓️ التخطيط المسبق لجلسات التركيز</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #64748b;'>خطط ليومك القادم مسبقاً: حدد الوقت، المادة، والمهام المتوقعة.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #64748b;'>اختر الوقت بنظام 12 ساعة (صباحاً ومساءً). يمنع النظام منعاً باتاً تداخل الجلسات في نفس التوقيت.</p>", unsafe_allow_html=True)
     
     try:
         subs = supabase.table('deep_subjects').select('id, subject_name').eq('user_id', user_id).execute()
@@ -204,23 +211,60 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
             p_date = c1.date_input("تاريخ الجلسة", date.today() + timedelta(days=1))
             chosen_s = c2.selectbox("المادة / المجال", options=list(s_dict.keys()))
             
-            t1, t2 = st.columns(2)
-            s_time = t1.time_input("وقت البدء")
-            e_time = t2.time_input("وقت الانتهاء")
+            st.markdown("---")
+            st.markdown("#### ⏰ تحديد وقت الجلسة (نظام 12 ساعة)")
+            t_col1, t_col2 = st.columns(2)
+            
+            with t_col1:
+                st.markdown("**وقت البدء**")
+                sh = st.selectbox("ساعة البدء", list(range(1, 13)), index=8, key="sh")
+                sm = st.selectbox("دقيقة البدء", [0, 15, 30, 45], key="sm")
+                sp = st.selectbox("الفترة (البدء)", ["صباحاً (AM)", "مساءً (PM)"], key="sp")
+                
+            with t_col2:
+                st.markdown("**وقت الانتهاء**")
+                eh = st.selectbox("ساعة الانتهاء", list(range(1, 13)), index=10, key="eh")
+                em = st.selectbox("دقيقة الانتهاء", [0, 15, 30, 45], key="em")
+                ep = st.selectbox("الفترة (الانتهاء)", ["صباحاً (AM)", "مساءً (PM)"], key="ep")
             
             tasks = st.text_area("المهام المتوقع إنجازها في هذه الجلسة بالتفصيل")
             
             if st.form_submit_button("📅 اعتماد وجدولة الجلسة", use_container_width=True):
                 if tasks:
-                    supabase.table('deep_plans').insert({
-                        'user_id': user_id,
-                        'plan_date': str(p_date),
-                        'subject_id': s_dict[chosen_s],
-                        'start_time': str(s_time),
-                        'end_time': str(e_time),
-                        'expected_tasks': tasks
-                    }).execute()
-                    st.success("🎉 تم جدولة الجلسة بنجاح!")
+                    new_start_t = convert_to_24h_time(sh, sm, sp)
+                    new_end_t = convert_to_24h_time(eh, em, ep)
+                    
+                    if new_start_t >= new_end_t:
+                        st.error("⚠️ خطأ في الوقت: وقت الانتهاء يجب أن يكون بعد وقت البدء.")
+                    else:
+                        # التحقق من عدم وجود تداخل مع جلسة أخرى في نفس اليوم
+                        try:
+                            existing_plans = supabase.table('deep_plans').select('start_time, end_time').eq('user_id', user_id).eq('plan_date', str(p_date)).execute()
+                            overlap = False
+                            if existing_plans.data:
+                                for ep_row in existing_plans.data:
+                                    ex_start = datetime.strptime(ep_row['start_time'], "%H:%M:%S").time()
+                                    ex_end = datetime.strptime(ep_row['end_time'], "%H:%M:%S").time()
+                                    
+                                    # شرط التداخل: (بداية جديدة < نهاية قديمة) و (نهاية جديدة > بداية قديمة)
+                                    if (new_start_t < ex_end) and (new_end_t > ex_start):
+                                        overlap = True
+                                        break
+                            
+                            if overlap:
+                                st.error("⚠️ عذراً، يوجد تداخل في الوقت مع جلسة أخرى مسجلة مسبقاً في نفس اليوم! لا يمكن عمل جلستين في نفس اللحظة.")
+                            else:
+                                supabase.table('deep_plans').insert({
+                                    'user_id': user_id,
+                                    'plan_date': str(p_date),
+                                    'subject_id': s_dict[chosen_s],
+                                    'start_time': str(new_start_t),
+                                    'end_time': str(new_end_t),
+                                    'expected_tasks': tasks
+                                }).execute()
+                                st.success("🎉 تم جدولة الجلسة بنجاح وبدون أي تداخل!")
+                        except Exception as err:
+                            st.error(f"خطأ أثناء التحقق أو الحفظ: {err}")
                 else:
                     st.warning("اكتب المهام المتوقعة.")
         st.markdown('</div>', unsafe_allow_html=True)
