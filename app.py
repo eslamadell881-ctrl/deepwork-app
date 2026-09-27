@@ -2,7 +2,7 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import plotly.express as px
-from datetime import date, timedelta, time
+import datetime
 
 # ==========================================
 # 1. إعدادات الصفحة والواجهة الفاخرة
@@ -150,7 +150,7 @@ def convert_to_24h_time(h, m, period):
         h += 12
     elif period == "صباحاً (AM)" and h == 12:
         h = 0
-    return time(h, m)
+    return datetime.time(h, m)
 
 # ==========================================
 # القسم الأول: إدارة المواد
@@ -189,11 +189,11 @@ if app_mode == "📚 إدارة المواد والمجالات":
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# القسم الثاني: التخطيط المسبق مع خيار الحذف ومنع التداخل
+# القسم الثاني: التخطيط المسبق مع معالجة الأوقات بدقة
 # ==========================================
 elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
     st.markdown("<h1>🗓️ التخطيط المسبق لجلسات التركيز</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #64748b;'>اختر الوقت بنظام 12 ساعة. يمنع النظام التداخل، ويمكنك حذف أي جلسة مخططة بسهولة.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #64748b;'>اختر وقت البدء والانتهاء بنظام 12 ساعة بكل مرونة وبدون أي تداخل في المواعيد.</p>", unsafe_allow_html=True)
     
     try:
         subs = supabase.table('deep_subjects').select('id, subject_name').eq('user_id', user_id).execute()
@@ -207,25 +207,23 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
         st.markdown('<div class="deep-card">', unsafe_allow_html=True)
         with st.form("plan_form"):
             c1, c2 = st.columns(2)
-            p_date = c1.date_input("تاريخ الجلسة", date.today() + timedelta(days=1))
+            p_date = c1.date_input("تاريخ الجلسة", datetime.date.today() + datetime.timedelta(days=1))
             chosen_s = c2.selectbox("المادة / المجال", options=list(s_dict.keys()))
             
             st.markdown("---")
-            st.markdown("#### ⏰ تحديد وقت الجلسة (نظام 12 ساعة)")
-            t_col1, t_col2 = st.columns(2)
+            st.markdown("#### ⏰ وقت البدء")
+            sc1, sc2, sc3 = st.columns(3)
+            sh = sc1.selectbox("الساعة", list(range(1, 13)), index=10, key="sh") # افتراضي 11
+            sm = sc2.selectbox("الدقيقة", [0, 15, 30, 45], key="sm")
+            sp = sc3.selectbox("الفترة", ["صباحاً (AM)", "مساءً (PM)"], index=0, key="sp") # افتراضي صباحاً
             
-            with t_col1:
-                st.markdown("**وقت البدء**")
-                sh = st.selectbox("ساعة البدء", list(range(1, 13)), index=8, key="sh")
-                sm = st.selectbox("دقيقة البدء", [0, 15, 30, 45], key="sm")
-                sp = st.selectbox("الفترة (البدء)", ["صباحاً (AM)", "مساءً (PM)"], key="sp")
-                
-            with t_col2:
-                st.markdown("**وقت الانتهاء**")
-                eh = st.selectbox("ساعة الانتهاء", list(range(1, 13)), index=10, key="eh")
-                em = st.selectbox("دقيقة الانتهاء", [0, 15, 30, 45], key="em")
-                ep = st.selectbox("الفترة (الانتهاء)", ["صباحاً (AM)", "مساءً (PM)"], key="ep")
+            st.markdown("#### ⏰ وقت الانتهاء")
+            ec1, ec2, ec3 = st.columns(3)
+            eh = ec1.selectbox("الساعة", list(range(1, 13)), index=0, key="eh") # افتراضي 1
+            em = ec2.selectbox("الدقيقة", [0, 15, 30, 45], index=0, key="em")
+            ep = ec3.selectbox("الفترة", ["صباحاً (AM)", "مساءً (PM)"], index=1, key="ep") # افتراضي مساءً
             
+            st.markdown("---")
             tasks = st.text_area("المهام المتوقع إنجازها في هذه الجلسة بالتفصيل")
             
             if st.form_submit_button("📅 اعتماد وجدولة الجلسة", use_container_width=True):
@@ -241,8 +239,8 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
                             overlap = False
                             if existing_plans.data:
                                 for ep_row in existing_plans.data:
-                                    ex_start = datetime.strptime(ep_row['start_time'], "%H:%M:%S").time() if isinstance(ep_row['start_time'], str) else ep_row['start_time']
-                                    ex_end = datetime.strptime(ep_row['end_time'], "%H:%M:%S").time() if isinstance(ep_row['end_time'], str) else ep_row['end_time']
+                                    ex_start = datetime.datetime.strptime(str(ep_row['start_time']), "%H:%M:%S").time()
+                                    ex_end = datetime.datetime.strptime(str(ep_row['end_time']), "%H:%M:%S").time()
                                     
                                     if (new_start_t < ex_end) and (new_end_t > ex_start):
                                         overlap = True
@@ -271,14 +269,14 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
         st.markdown('<div class="deep-card">', unsafe_allow_html=True)
         st.markdown("### 📋 جدول خططك المستقبلية وإدارة الحذف")
         try:
-            plans_res = supabase.table('deep_plans').select('id, plan_date, start_time, end_time, expected_tasks, deep_subjects(subject_name)').eq('user_id', user_id).gte('plan_date', str(date.today())).order('plan_date').execute()
+            plans_res = supabase.table('deep_plans').select('id, plan_date, start_time, end_time, expected_tasks, deep_subjects(subject_name)').eq('user_id', user_id).gte('plan_date', str(datetime.date.today())).order('plan_date').execute()
             if plans_res.data:
                 plans_list = plans_res.data
                 df_p = pd.DataFrame(plans_list)
                 st.dataframe(df_p[['plan_date', 'start_time', 'end_time', 'expected_tasks']], use_container_width=True)
                 
                 st.markdown("#### 🗑️ حذف جلسة مخططة")
-                plan_options = {f"تاريخ: {p['plan_date']} | من {p['start_time']} لـ {p['end_time']} | المهام: {p['expected_tasks'][:30]}... (ID: {p['id']})": p['id'] for p in plans_list}
+                plan_options = {f"تاريخ: {p['plan_date']} | من {p['start_time']} لـ {p['end_time']} | المهام: {p['expected_tasks'][:30]}...": p['id'] for p in plans_list}
                 
                 chosen_to_delete = st.selectbox("اختر الجلسة المراد حذفها", options=list(plan_options.keys()))
                 if st.button("🗑️ تأكيد حذف الجلسة المحددة", type="primary"):
@@ -297,9 +295,9 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
 # ==========================================
 elif app_mode == "⚡ تنفيذ وتقييم جلسات اليوم":
     st.markdown("<h1>⚡ تنفيذ وتقييم جلسات اليوم</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color: #64748b;'>جلساتك المخططة لتاريخ اليوم: <b>{date.today()}</b>. سجل أداءك وتركيزك.</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color: #64748b;'>جلساتك المخططة لتاريخ اليوم: <b>{datetime.date.today()}</b>. سجل أداءك وتركيزك.</p>", unsafe_allow_html=True)
     
-    today_str = str(date.today())
+    today_str = str(datetime.date.today())
     try:
         today_plans = supabase.table('deep_plans').select('id, start_time, end_time, expected_tasks, deep_subjects(subject_name)').eq('user_id', user_id).eq('plan_date', today_str).execute()
         plans_list = today_plans.data if today_plans.data else []
