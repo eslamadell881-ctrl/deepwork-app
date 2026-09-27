@@ -145,7 +145,6 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.rerun()
 
-# دالة لتحويل وقت 12 ساعة (ساعة، دقيقة، فترة) إلى كائن time 24 ساعة للمقارنة
 def convert_to_24h_time(h, m, period):
     if period == "مساءً (PM)" and h != 12:
         h += 12
@@ -190,11 +189,11 @@ if app_mode == "📚 إدارة المواد والمجالات":
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# القسم الثاني: التخطيط المسبق بدون تداخل وبنظام 12 ساعة
+# القسم الثاني: التخطيط المسبق مع خيار الحذف ومنع التداخل
 # ==========================================
 elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
     st.markdown("<h1>🗓️ التخطيط المسبق لجلسات التركيز</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #64748b;'>اختر الوقت بنظام 12 ساعة (صباحاً ومساءً). يمنع النظام منعاً باتاً تداخل الجلسات في نفس التوقيت.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #64748b;'>اختر الوقت بنظام 12 ساعة. يمنع النظام التداخل، ويمكنك حذف أي جلسة مخططة بسهولة.</p>", unsafe_allow_html=True)
     
     try:
         subs = supabase.table('deep_subjects').select('id, subject_name').eq('user_id', user_id).execute()
@@ -237,22 +236,20 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
                     if new_start_t >= new_end_t:
                         st.error("⚠️ خطأ في الوقت: وقت الانتهاء يجب أن يكون بعد وقت البدء.")
                     else:
-                        # التحقق من عدم وجود تداخل مع جلسة أخرى في نفس اليوم
                         try:
                             existing_plans = supabase.table('deep_plans').select('start_time, end_time').eq('user_id', user_id).eq('plan_date', str(p_date)).execute()
                             overlap = False
                             if existing_plans.data:
                                 for ep_row in existing_plans.data:
-                                    ex_start = datetime.strptime(ep_row['start_time'], "%H:%M:%S").time()
-                                    ex_end = datetime.strptime(ep_row['end_time'], "%H:%M:%S").time()
+                                    ex_start = datetime.strptime(ep_row['start_time'], "%H:%M:%S").time() if isinstance(ep_row['start_time'], str) else ep_row['start_time']
+                                    ex_end = datetime.strptime(ep_row['end_time'], "%H:%M:%S").time() if isinstance(ep_row['end_time'], str) else ep_row['end_time']
                                     
-                                    # شرط التداخل: (بداية جديدة < نهاية قديمة) و (نهاية جديدة > بداية قديمة)
                                     if (new_start_t < ex_end) and (new_end_t > ex_start):
                                         overlap = True
                                         break
                             
                             if overlap:
-                                st.error("⚠️ عذراً، يوجد تداخل في الوقت مع جلسة أخرى مسجلة مسبقاً في نفس اليوم! لا يمكن عمل جلستين في نفس اللحظة.")
+                                st.error("⚠️ عذراً، يوجد تداخل في الوقت مع جلسة أخرى مسجلة مسبقاً في نفس اليوم!")
                             else:
                                 supabase.table('deep_plans').insert({
                                     'user_id': user_id,
@@ -263,22 +260,36 @@ elif app_mode == "🗓️ التخطيط المسبق (خطة الغد)":
                                     'expected_tasks': tasks
                                 }).execute()
                                 st.success("🎉 تم جدولة الجلسة بنجاح وبدون أي تداخل!")
+                                st.rerun()
                         except Exception as err:
                             st.error(f"خطأ أثناء التحقق أو الحفظ: {err}")
                 else:
                     st.warning("اكتب المهام المتوقعة.")
         st.markdown('</div>', unsafe_allow_html=True)
         
+        # جدول الخطط مع خيار الحذف
         st.markdown('<div class="deep-card">', unsafe_allow_html=True)
-        st.markdown("### 📋 جدول خططك المستقبلية")
+        st.markdown("### 📋 جدول خططك المستقبلية وإدارة الحذف")
         try:
-            plans = supabase.table('deep_plans').select('plan_date, start_time, end_time, expected_tasks, deep_subjects(subject_name)').eq('user_id', user_id).gte('plan_date', str(date.today())).order('plan_date').execute()
-            if plans.data:
-                st.dataframe(pd.DataFrame(plans.data), use_container_width=True)
+            plans_res = supabase.table('deep_plans').select('id, plan_date, start_time, end_time, expected_tasks, deep_subjects(subject_name)').eq('user_id', user_id).gte('plan_date', str(date.today())).order('plan_date').execute()
+            if plans_res.data:
+                plans_list = plans_res.data
+                df_p = pd.DataFrame(plans_list)
+                st.dataframe(df_p[['plan_date', 'start_time', 'end_time', 'expected_tasks']], use_container_width=True)
+                
+                st.markdown("#### 🗑️ حذف جلسة مخططة")
+                plan_options = {f"تاريخ: {p['plan_date']} | من {p['start_time']} لـ {p['end_time']} | المهام: {p['expected_tasks'][:30]}... (ID: {p['id']})": p['id'] for p in plans_list}
+                
+                chosen_to_delete = st.selectbox("اختر الجلسة المراد حذفها", options=list(plan_options.keys()))
+                if st.button("🗑️ تأكيد حذف الجلسة المحددة", type="primary"):
+                    target_id = plan_options[chosen_to_delete]
+                    supabase.table('deep_plans').delete().eq('id', target_id).execute()
+                    st.success("✅ تم حذف الجلسة بنجاح!")
+                    st.rerun()
             else:
                 st.info("لا توجد خطط مستقبلية مسجلة.")
-        except:
-            pass
+        except Exception as e:
+            st.error(f"خطأ: {e}")
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
